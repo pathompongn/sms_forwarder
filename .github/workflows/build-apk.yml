@@ -25,6 +25,21 @@ jobs:
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Render launcher icons from SVG
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq librsvg2-bin
+          declare -A SIZES=( [mipmap-mdpi]=48 [mipmap-hdpi]=72 [mipmap-xhdpi]=96 [mipmap-xxhdpi]=144 [mipmap-xxxhdpi]=192 )
+          for folder in "${!SIZES[@]}"; do
+            size=${SIZES[$folder]}
+            outdir="app/src/main/res/$folder"
+            mkdir -p "$outdir"
+            rsvg-convert -w "$size" -h "$size" icon_source.svg -o "$outdir/ic_launcher.png"
+            cp "$outdir/ic_launcher.png" "$outdir/ic_launcher_round.png"
+          done
+          rm -f app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
+                app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          echo "Icons rendered from SVG successfully"
+
       - name: Install Gradle 8.2
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.2-bin.zip -O /tmp/gradle.zip
