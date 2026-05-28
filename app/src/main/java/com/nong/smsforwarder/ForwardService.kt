@@ -29,16 +29,26 @@ class ForwardService : Service() {
         executor.execute {
             val settings = SettingsManager(this)
             val timestamp = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date())
-            try {
-                EmailSender.send(settings, sender, body)
+            var lastException: Exception? = null
+            var success = false
+            for (attempt in 1..3) {
+                try {
+                    EmailSender.send(settings, sender, body)
+                    success = true
+                    break
+                } catch (e: Exception) {
+                    lastException = e
+                    if (attempt < 3) Thread.sleep(5000)
+                }
+            }
+            if (success) {
                 settings.addLogEntry("$timestamp ✓ ส่งสำเร็จ | จาก: $sender | ${body.take(40)}...")
                 showResultNotification("ส่ง Email สำเร็จ", "จาก: $sender")
-            } catch (e: Exception) {
-                settings.addLogEntry("$timestamp ✗ ส่งล้มเหลว | ${e.message}")
-                showResultNotification("ส่ง Email ล้มเหลว", e.message ?: "ข้อผิดพลาดไม่ทราบสาเหตุ")
-            } finally {
-                stopSelf(startId)
+            } else {
+                settings.addLogEntry("$timestamp ✗ ส่งล้มเหลว (retry 3 ครั้งแล้ว) | ${lastException?.message}")
+                showResultNotification("ส่ง Email ล้มเหลว", lastException?.message ?: "ข้อผิดพลาดไม่ทราบสาเหตุ")
             }
+            stopSelf(startId)
         }
 
         return START_NOT_STICKY
