@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -17,6 +18,7 @@ import java.util.concurrent.Executors
 class ForwardService : Service() {
 
     private val executor = Executors.newSingleThreadExecutor()
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -25,33 +27,60 @@ class ForwardService : Service() {
         val body = intent?.getStringExtra(EXTRA_BODY) ?: ""
 
         showForegroundNotification("กำลังส่ง email...")
+        acquireWakeLock()
 
         executor.execute {
-            val settings = SettingsManager(this)
-            val timestamp = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date())
-            var lastException: Exception? = null
-            var success = false
-            for (attempt in 1..3) {
-                try {
-                    EmailSender.send(settings, sender, body)
-                    success = true
-                    break
-                } catch (e: Exception) {
-                    lastException = e
-                    if (attempt < 3) Thread.sleep(5000)
+            try {
+                val settings = SettingsManager(this)
+                val timestamp = SimpleDateFormat("dd/MM/yy HH:mm", Locale.getDefault()).format(Date())
+                var lastException: Exception? = null
+                var success = false
+                for (attempt in 1..3) {
+                    try {
+                        EmailSender.send(settings, sender, body)
+                        success = true
+                        break
+                    } catch (e: Exception) {
+                        lastException = e
+                        if (attempt < 3) Thread.sleep(5000)
+                    }
                 }
+                if (success) {
+                    settings.addLogEntry("$timestamp ✓ ส่งสำเร็จ | จาก: $sender | ${body.take(40)}...")
+                    showResultNotification("ส่ง Email สำเร็จ", "จาก: $sender")
+                } else {
+                    settings.addLogEntry("$timestamp ✗ ส่งล้มเหลว (retry 3 ครั้งแล้ว) | ${lastException?.message}")
+                    showResultNotification("ส่ง Email ล้มเหลว", lastException?.message ?: "ข้อผิดพลาดไม่ทราบสาเหตุ")
+                }
+            } finally {
+                releaseWakeLock()
+                stopSelf(startId)
             }
-            if (success) {
-                settings.addLogEntry("$timestamp ✓ ส่งสำเร็จ | จาก: $sender | ${body.take(40)}...")
-                showResultNotification("ส่ง Email สำเร็จ", "จาก: $sender")
-            } else {
-                settings.addLogEntry("$timestamp ✗ ส่งล้มเหลว (retry 3 ครั้งแล้ว) | ${lastException?.message}")
-                showResultNotification("ส่ง Email ล้มเหลว", lastException?.message ?: "ข้อผิดพลาดไม่ทราบสาเหตุ")
-            }
-            stopSelf(startId)
         }
 
         return START_NOT_STICKY
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "SmsForwarder:send_email"
+            ).apply {
+                acquire(2 * 60 * 1000L) // 2 นาที
+            }
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun showForegroundNotification(text: String) {
