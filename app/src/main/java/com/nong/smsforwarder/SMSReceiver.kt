@@ -3,11 +3,16 @@ package com.nong.smsforwarder
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.provider.Telephony
+import androidx.work.BackoffPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class SMSReceiver : BroadcastReceiver() {
 
@@ -52,16 +57,16 @@ class SMSReceiver : BroadcastReceiver() {
 
         settings.addLogEntry("$ts [3] ตรง keyword — กำลัง forward...")
 
-        val serviceIntent = Intent(context, ForwardService::class.java).apply {
-            putExtra(ForwardService.EXTRA_SENDER, sender)
-            putExtra(ForwardService.EXTRA_BODY, fullBody)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
-        }
+        val data = workDataOf(
+            ForwardWorker.KEY_SENDER to sender,
+            ForwardWorker.KEY_BODY to fullBody
+        )
+        val request = OneTimeWorkRequestBuilder<ForwardWorker>()
+            .setInputData(data)
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(context).enqueue(request)
     }
 
     private fun timestamp() =
